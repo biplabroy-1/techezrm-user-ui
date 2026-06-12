@@ -7,7 +7,7 @@ export interface ProductDetail {
   name: string
   description: string
   price: number
-  category: string
+  category: string | { _id?: string; uniqueId?: string; name?: string; slug?: string }
   inStock: boolean
   images: string[]
   bannerImage: string
@@ -15,6 +15,13 @@ export interface ProductDetail {
   status: string
   createdAt: string
   updatedAt: string
+  moq?: number
+  unit?: string
+  tags?: string[]
+  applications?: string[]
+  functions?: string[]
+  countryOfOrigin?: string[]
+  dietaryAttributes?: { title: string; logo?: string; certificateLink?: string }[]
 }
 
 export interface ProductDetailResponse {

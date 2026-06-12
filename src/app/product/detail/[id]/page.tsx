@@ -1,9 +1,9 @@
-﻿"use client";
+"use client";
 
 import type React from "react";
 import { useEffect, useState } from "react";
 import { useParams, useRouter, usePathname, useSearchParams } from "next/navigation";
-import { Heart, MessageCircle, Mail, Share2, ShoppingCart, Plus, Minus } from "lucide-react";
+import { Heart, MessageCircle, Mail, Share2, ShoppingCart, Plus, Minus, Send } from "lucide-react";
 import Image from "next/image";
 import { useProductDetail } from "@/api/handlers/productDetailsHandler";
 import { useAddToWishlist } from "@/api/handlers/wishlistHandler";
@@ -11,25 +11,13 @@ import { useAddToCart } from "@/api/handlers/cartHandler";
 import { useProductFAQs } from "@/api/handlers/faqHandler";
 import { useAppStore } from "@/store/use-app-store";
 import QuoteFormModal from "@/components/quote-form-modal";
-import FAQSection from "@/components/FAQSection";
+import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from "@/components/ui/accordion";
 import ProductVariants from "@/components/ProductVariants";
 import { useProductVariants } from "@/api/handlers/productVariantsHandler";
 import CompanyDocumentsSection from "@/components/CompanyDocumentsSection";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
-
-interface TabPanelProps {
-  children?: React.ReactNode;
-  index: number;
-  value: number;
-}
-
-function TabPanel({ children, value, index }: TabPanelProps) {
-  return (
-    <div role="tabpanel" hidden={value !== index} id={`product-tabpanel-${index}`}>
-      {value === index && <div className="py-6">{children}</div>}
-    </div>
-  );
-}
 
 export default function ProductDetailPage() {
   const params = useParams();
@@ -46,14 +34,16 @@ export default function ProductDetailPage() {
 
   const { data: response, isLoading, error, isError } = useProductDetail(productId);
   const addToWishlistMutation = useAddToWishlist();
-  const addToCartMutation = useAddToCart();
 
-  const { data: faqResponse, isLoading: faqLoading, error: faqError } = useProductFAQs(productId);
+  const [isQuoteModalOpen, setIsQuoteModalOpen] = useState(false);
+  const addToCartMutation = useAddToCart();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const productData = (response as any)?.data;
+  const faqProductId = productData?.uniqueId || "";
+  const { data: faqResponse } = useProductFAQs(faqProductId, { enabled: !!faqProductId });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const faqs = (faqResponse as any)?.data || [];
 
-  const [tabValue, setTabValue] = useState(0);
-  const [isQuoteModalOpen, setIsQuoteModalOpen] = useState(false);
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState("");
   const [minCartQuantity, setMinCartQuantity] = useState(1);
@@ -95,17 +85,6 @@ export default function ProductDetailPage() {
     );
   };
 
-  const handleAddToCart = () => {
-    if (!isAuthenticated || !customer) { router.push("/sign_in"); return; }
-    addToCartMutation.mutate(
-      { customerId: customer.id, productId, quantity: cartQuantity },
-      {
-        onSuccess: () => { setSnackbarMessage("Added to cart successfully!"); setSnackbarOpen(true); },
-        onError: () => { setSnackbarMessage("Failed to add product to cart. Please try again."); setSnackbarOpen(true); },
-      }
-    );
-  };
-
   if (isLoading) {
     return (
       <div className="max-w-7xl mx-auto py-8 px-4 flex justify-center">
@@ -125,7 +104,7 @@ export default function ProductDetailPage() {
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const product: any = response?.data ?? {};
+  const product: any = productData ?? {};
 
   if (!product) {
     return (
@@ -172,451 +151,333 @@ export default function ProductDetailPage() {
     setMagnifierPosition({ x, y });
   };
 
-  const features =
-    product?.dietaryAttributes?.map((attr: any) => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const features = (product?.dietaryAttributes as any[])?.map((attr: { title: string; logo?: string; certificateLink?: string }) => ({
       label: attr.title,
       color: "var(--color-brand)",
       logo: attr.logo,
       certificateLink: attr.certificateLink,
     })) || [];
 
-  const handleWhatsAppShare = (prod: any) => {
+  const handleWhatsAppShare = (prod: { name: string }) => {
     const message = `To checkout ${prod.name} on EZRM, please click on the below link:\n${currentUrl}`;
     window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, "_blank");
   };
 
-  const handleEmailShare = (prod: any) => {
+  const handleEmailShare = (prod: { name: string }) => {
     const subject = "Check out product on EZRM!";
     const body = `Hi,\n\nTo checkout ${prod.name} on EZRM, please click on the below link:\n${currentUrl}`;
     window.location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   };
 
-  const tabLabels = ["Sample Product", "Product Description", "FAQs"];
+  const specifications: Record<string, string> = {};
+  if (product.appearance) specifications["Appearance"] = product.appearance;
+  if (product.category?.name) specifications["Category"] = product.category.name;
+  if (product.uniqueId) specifications["Product ID"] = product.uniqueId;
 
   return (
-    <div className="max-w-7xl mx-auto py-2 px-4">
-      {/* Header breadcrumb */}
-      <p className="mb-6 font-medium text-body text-lg">
-        {product?.name}{" "}
-        /{" "}
-        <span
-          onClick={() => router.push(`/product?category=${product?.category?.slug}`)}
-          className="text-brand cursor-pointer hover:text-brand-hover hover:underline transition-colors"
-        >
-          {product?.category?.name}
-        </span>
-      </p>
+    <div className="min-h-screen bg-background">
+      <div className="py-20 lg:py-24 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-7xl mx-auto">
+          {/* Breadcrumb */}
+          <p className="mb-6 text-sm text-muted-foreground">
+            <span className="cursor-pointer hover:text-primary" onClick={() => router.push("/product")}>Products</span>
+            {" / "}
+            <span className="font-medium text-foreground">{product.name}</span>
+          </p>
 
-      {/* Main Content */}
-      <div className="flex gap-6">
-        {/* Left Side - 65% */}
-        <div className="w-[65%]">
-          {/* Product Image */}
-          <div
-            className="relative w-full h-[400px] rounded-[20px] overflow-hidden bg-paper mb-6"
-          >
-            <div
-              className="relative w-full h-full"
-              style={{ cursor: isMagnified ? "zoom-out" : "zoom-in" }}
-              onMouseEnter={() => setIsMagnified(true)}
-              onMouseLeave={() => setIsMagnified(false)}
-              onMouseMove={handleMouseMove}
-            >
-              <Image src={getCurrentImage().src} alt={getCurrentImage().alt} fill style={{ objectFit: "cover" }} />
-              {isMagnified && (
+          <div className="grid lg:grid-cols-2 gap-8 lg:gap-12">
+            {/* Left Column */}
+            <div className="space-y-6 lg:space-y-8">
+              {/* Product Name & Short Intro */}
+              <div>
+                <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold mb-3 lg:mb-4 text-primary">{product.name}</h1>
+                <p className="text-base lg:text-lg text-muted-foreground">{product.uniqueId && `Product Code: ${product.uniqueId}`}</p>
+                {product.moq && (
+                  <div className="mt-3 inline-block">
+                    <span className="text-xs sm:text-sm font-semibold px-2 sm:px-3 py-1 rounded-full bg-primary/10 text-primary border border-primary/30">
+                      MOQ: {product.moq}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Product Image */}
+              <Card className="overflow-hidden">
                 <div
-                  className="absolute inset-0 pointer-events-none z-[2]"
-                  style={{
-                    background: `url(${getCurrentImage().src})`,
-                    backgroundSize: "300%",
-                    backgroundPosition: `${magnifierPosition.x}% ${magnifierPosition.y}%`,
-                  }}
-                />
+                  className="relative aspect-square"
+                  style={{ cursor: isMagnified ? "zoom-out" : "zoom-in" }}
+                  onMouseEnter={() => setIsMagnified(true)}
+                  onMouseLeave={() => setIsMagnified(false)}
+                  onMouseMove={handleMouseMove}
+                >
+                  <Image
+                    src={getCurrentImage().src}
+                    alt={getCurrentImage().alt}
+                    fill
+                    className="object-cover"
+                  />
+                  {isMagnified && (
+                    <div
+                      className="absolute inset-0 pointer-events-none z-[2]"
+                      style={{
+                        background: `url(${getCurrentImage().src})`,
+                        backgroundSize: "300%",
+                        backgroundPosition: `${magnifierPosition.x}% ${magnifierPosition.y}%`,
+                      }}
+                    />
+                  )}
+                </div>
+              </Card>
+
+              {/* Thumbnail Gallery */}
+              {getProductImages().length > 1 && (
+                <div className="grid grid-cols-5 gap-2">
+                  {getProductImages().map((image, index) => (
+                    <div
+                      key={index}
+                      onClick={() => setSelectedImageIndex(index)}
+                      className={`relative aspect-square overflow-hidden rounded-md cursor-pointer transition-all duration-300 ${
+                        selectedImageIndex === index ? "ring-2 ring-primary" : "ring-1 ring-border hover:ring-primary/50"
+                      }`}
+                    >
+                      <Image src={image.src} alt={image.alt} fill className="object-cover" />
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
+                <Button size="lg" className="flex-1 gap-2" onClick={handlePlaceEnquiry}>
+                  <Send className="h-5 w-5" />
+                  Send Enquiries
+                </Button>
+                <Button
+                  size="lg"
+                  variant="outline"
+                  className="flex-1 gap-2"
+                  onClick={handleWishlistClick}
+                  disabled={addToWishlistMutation.isPending}
+                >
+                  <Heart className="h-5 w-5" />
+                  Add to Wishlist
+                </Button>
+              </div>
+
+              {/* Social Sharing */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">Share:</span>
+                <button onClick={() => handleWhatsAppShare(product)} className="p-1.5 text-[#25d366] hover:opacity-80 transition-opacity">
+                  <MessageCircle className="w-4 h-4" />
+                </button>
+                <button onClick={() => handleEmailShare(product)} className="p-1.5 text-[#ea4335] hover:opacity-80 transition-opacity">
+                  <Mail className="w-4 h-4" />
+                </button>
+                <button className="p-1.5 text-primary hover:opacity-80 transition-opacity">
+                  <Share2 className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Specifications */}
+              {Object.keys(specifications).length > 0 && (
+                <Card className="p-4 sm:p-6">
+                  <h2 className="text-xl sm:text-2xl font-bold mb-3 sm:mb-4">Specifications</h2>
+                  <div className="space-y-2 sm:space-y-3">
+                    {Object.entries(specifications).map(([key, value]) => (
+                      <div key={key} className="flex justify-between border-b border-border pb-2 text-sm sm:text-base">
+                        <span className="font-medium capitalize">{key}</span>
+                        <span className="text-muted-foreground text-right ml-2">{value}</span>
+                      </div>
+                    ))}
+                    <div className="flex justify-between border-b border-border pb-2 text-sm sm:text-base">
+                      <span className="font-medium">Stock Status</span>
+                      <span className={`text-right ml-2 font-medium ${product.inStock ? "text-green-600" : "text-red-500"}`}>
+                        {product.inStock ? "In Stock" : "Out of Stock"}
+                      </span>
+                    </div>
+                  </div>
+                </Card>
+              )}
+
+              {/* Dietary Attributes / Certifications */}
+              {features.length > 0 && (
+                <Card className="p-4 sm:p-6">
+                  <h2 className="text-xl sm:text-2xl font-bold mb-3 sm:mb-4">Certifications & Attributes</h2>
+                  <div className="flex flex-wrap gap-4">
+                    {features.map((feature: { label: string; logo?: string; certificateLink?: string }, i: number) => (
+                      <div
+                        key={i}
+                        className="flex items-center gap-3 p-3 rounded-lg border border-primary/10 bg-primary/5 min-w-[200px] flex-1"
+                        style={{ cursor: feature.certificateLink ? "pointer" : "default" }}
+                        onClick={() => feature.certificateLink && window.open(feature.certificateLink, "_blank")}
+                      >
+                        {feature.logo && (
+                          <Image src={feature.logo} alt={feature.label} width={32} height={32} className="object-contain rounded" />
+                        )}
+                        <div>
+                          <p className="font-semibold text-sm">{feature.label}</p>
+                          {feature.certificateLink && <p className="text-primary text-[10px]">Click to view certificate</p>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              )}
+            </div>
+
+            {/* Right Column */}
+            <div className="space-y-6 lg:space-y-8">
+              {/* Description */}
+              {product.description && (
+                <Card className="p-4 sm:p-6">
+                  <h2 className="text-xl sm:text-2xl font-bold mb-3 sm:mb-4">Description</h2>
+                  <p className="text-sm sm:text-base text-muted-foreground whitespace-pre-line">{product.description}</p>
+                </Card>
+              )}
+
+              {/* Applications & Functions & Tags */}
+              <Card className="p-4 sm:p-6">
+                <h2 className="text-xl sm:text-2xl font-bold mb-3 sm:mb-4">Product Details</h2>
+                <div className="space-y-4">
+                  {product.applications?.length > 0 && (
+                    <div>
+                      <h3 className="font-semibold text-sm mb-2">Applications</h3>
+                      <div className="flex flex-wrap gap-2">
+                        {product.applications.map((app: string, i: number) => (
+                          <span key={i} className="px-2 py-1 rounded-md text-xs font-medium bg-primary/10 text-primary border border-primary/20">
+                            {app.replace(/-/g, " ").replace(/\b\w/g, (l: string) => l.toUpperCase())}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {product.functions?.length > 0 && (
+                    <div>
+                      <h3 className="font-semibold text-sm mb-2">Functions</h3>
+                      <div className="flex flex-wrap gap-2">
+                        {product.functions.map((func: string, i: number) => (
+                          <span key={i} className="px-2 py-1 rounded-md text-xs font-medium bg-primary/10 text-primary border border-primary/20">
+                            {func.replace(/-/g, " ").replace(/\b\w/g, (l: string) => l.toUpperCase())}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {product.tags?.length > 0 && (
+                    <div>
+                      <h3 className="font-semibold text-sm mb-2">Tags</h3>
+                      <div className="flex flex-wrap gap-2">
+                        {product.tags.map((tag: string, i: number) => (
+                          <span key={i} className="px-2 py-1 rounded-md text-xs font-medium bg-primary/10 text-primary border border-primary/20">
+                            {tag.replace(/-/g, " ").replace(/\b\w/g, (l: string) => l.toUpperCase())}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {product.countryOfOrigin?.length > 0 && (
+                    <div>
+                      <h3 className="font-semibold text-sm mb-2">Countries of Origin</h3>
+                      <div className="flex flex-wrap gap-2">
+                        {product.countryOfOrigin.map((country: string, i: number) => (
+                          <span key={i} className="px-2 py-1 rounded-md text-xs font-medium bg-primary/10 text-primary border border-primary/20">
+                            {country}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </Card>
+
+              {/* Product Variants */}
+              <ProductVariants productId={productId} />
+
+              {/* Quantity & Cart */}
+              <Card className="p-4 sm:p-6">
+                <h2 className="text-xl sm:text-2xl font-bold mb-3 sm:mb-4">Order</h2>
+                <div className="mb-4">
+                  <p className="font-semibold text-sm mb-2">Quantity</p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setCartQuantity(Math.max(minCartQuantity, cartQuantity - minCartQuantity))}
+                      disabled={cartQuantity <= minCartQuantity}
+                      className="w-8 h-8 flex items-center justify-center border border-border rounded disabled:opacity-50 hover:border-primary transition-colors"
+                    >
+                      <Minus className="w-4 h-4" />
+                    </button>
+                    <input
+                      type="number"
+                      value={cartQuantity}
+                      min={minCartQuantity}
+                      step={minCartQuantity}
+                      onChange={(e) => {
+                        let value = parseInt(e.target.value) || minCartQuantity;
+                        if (value < minCartQuantity) value = minCartQuantity;
+                        else value = Math.ceil(value / minCartQuantity) * minCartQuantity;
+                        setCartQuantity(value);
+                      }}
+                      className="w-16 h-8 text-center text-sm border border-border rounded outline-none focus:border-primary"
+                    />
+                    <button
+                      onClick={() => setCartQuantity(cartQuantity + minCartQuantity)}
+                      className="w-8 h-8 flex items-center justify-center border border-border rounded hover:border-primary transition-colors"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <Button
+                    onClick={() => {
+                      if (!isAuthenticated || !customer) { router.push("/sign_in"); return; }
+                      addToCartMutation.mutate(
+                        { customerId: customer.id, productId, quantity: cartQuantity },
+                        {
+                          onSuccess: () => { setSnackbarMessage("Added to cart successfully!"); setSnackbarOpen(true); },
+                          onError: () => { setSnackbarMessage("Failed to add product to cart."); setSnackbarOpen(true); },
+                        }
+                      );
+                    }}
+                    disabled={!product.inStock || minCartQuantity <= 1}
+                    className="w-full gap-2"
+                  >
+                    <ShoppingCart className="w-4 h-4" />
+                    {product.inStock ? "Add to Cart" : "Out of Stock"}
+                  </Button>
+                </div>
+              </Card>
+
+              {/* FAQs */}
+              {faqs.length > 0 && (
+                <Card className="p-4 sm:p-6">
+                  <h2 className="text-xl sm:text-2xl font-bold mb-3 sm:mb-4">FAQs</h2>
+                  <Accordion type="single" collapsible className="w-full">
+                    {faqs.map((faq: { question: string; answer: string }, idx: number) => (
+                      <AccordionItem key={idx} value={`faq-${idx}`}>
+                        <AccordionTrigger className="text-sm sm:text-base">{faq.question}</AccordionTrigger>
+                        <AccordionContent className="text-sm sm:text-base">{faq.answer}</AccordionContent>
+                      </AccordionItem>
+                    ))}
+                  </Accordion>
+                </Card>
               )}
             </div>
           </div>
 
-          {/* Thumbnail Gallery */}
-          <div className="mb-6">
-            <p className="font-semibold text-body text-sm mb-3">
-              Product Images ({getProductImages().length})
-            </p>
-            <div className="flex gap-3 overflow-x-auto pb-2">
-              {getProductImages().map((image, index) => (
-                <div
-                  key={index}
-                  onClick={() => setSelectedImageIndex(index)}
-                  className="relative flex-shrink-0 w-[90px] h-[90px] rounded-xl overflow-hidden cursor-pointer transition-all duration-300 hover:scale-105"
-                  style={{
-                    border: selectedImageIndex === index ? "3px solid var(--color-brand)" : "2px solid var(--color-line-light)",
-                    boxShadow: selectedImageIndex === index ? "0 4px 20px rgba(255,107,53,0.3)" : "0 2px 8px rgba(0,0,0,0.1)",
-                  }}
-                >
-                  <Image src={image.src} alt={image.alt} fill style={{ objectFit: "cover" }} />
-                  {image.type === "banner" && (
-                    <span className="absolute top-1.5 left-1.5 bg-brand/95 text-white text-[11px] font-semibold px-2 py-0.5 rounded-md">
-                      Main
-                    </span>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Three Tabs */}
-          <div className="mt-4">
-            <div className="flex border-b border-gray-200">
-              {tabLabels.map((label, i) => (
-                <button
-                  key={i}
-                  onClick={() => setTabValue(i)}
-                  className={`px-4 py-2.5 text-sm font-medium transition-all ${
-                    tabValue === i
-                      ? "bg-brand text-white rounded-t-md"
-                      : "text-dim hover:text-body"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-
-            <TabPanel value={tabValue} index={0}>
-              <p className="text-dim leading-relaxed text-sm">
-                Sample Product information and details will be displayed here.
-              </p>
-            </TabPanel>
-
-            <TabPanel value={tabValue} index={1}>
-              <div>
-                <h2 className="font-semibold text-lg mb-6">Product Description</h2>
-
-                {/* Product Overview */}
-                <div className="mb-8">
-                  <p className="leading-[1.8] text-body mb-6 text-[15px] text-justify">
-                    {product?.description}
-                  </p>
-                </div>
-
-                {/* Product Details Table */}
-                <div className="mb-8">
-                  <h3 className="font-semibold text-body mb-5">Product Details</h3>
-                  <div className="rounded-xl border border-line-light overflow-hidden shadow-[0_2px_8px_rgba(0,0,0,0.06)]">
-                    <table className="w-full min-w-[400px]">
-                      <tbody>
-                        {[
-                          { label: "Appearance", value: product.appearance || "Not specified" },
-                          { label: "Category", value: product.category?.name || "Not specified" },
-                          { label: "Product ID", value: product.uniqueId, mono: true },
-                        ].map((row, i) => (
-                          <tr key={i} className={i % 2 === 0 ? "bg-paper" : "bg-white"}>
-                            <td className="w-[30%] px-4 py-3 font-semibold text-brand text-sm border-r border-line-light bg-[rgba(255,107,53,0.03)]">
-                              {row.label}
-                            </td>
-                            <td className={`px-4 py-3 text-body text-sm border-b border-line-light ${row.mono ? "font-mono font-medium" : ""}`}>
-                              {row.value}
-                            </td>
-                          </tr>
-                        ))}
-
-                        {/* Stock Status */}
-                        <tr className="bg-paper">
-                          <td className="w-[30%] px-4 py-3 font-semibold text-brand text-sm border-r border-line-light bg-[rgba(255,107,53,0.03)]">
-                            Stock Status
-                          </td>
-                          <td className="px-4 py-3 border-b border-line-light">
-                            <span
-                              className={`inline-block px-3 py-1 rounded-md text-xs font-semibold border ${
-                                product.inStock
-                                  ? "bg-success-light text-success border-success-light"
-                                  : "bg-danger-light text-danger border-danger-light"
-                              }`}
-                            >
-                              {product.inStock ? "In Stock" : "Out of Stock"}
-                            </span>
-                          </td>
-                        </tr>
-
-                        {/* Applications */}
-                        <tr className="bg-white">
-                          <td className="w-[30%] px-4 py-3 font-semibold text-brand text-sm border-r border-line-light bg-[rgba(255,107,53,0.03)]">
-                            Applications
-                          </td>
-                          <td className="px-4 py-3 border-b border-line-light">
-                            {product.applications?.length > 0 ? (
-                              <div className="flex flex-wrap gap-2">
-                                {product.applications.map((app: string, i: number) => (
-                                  <span key={i} className="px-2 py-1 rounded-md text-xs font-medium bg-[rgba(255,107,53,0.1)] text-brand border border-[rgba(255,107,53,0.2)]">
-                                    {app.replace(/-/g, " ").replace(/\b\w/g, (l: string) => l.toUpperCase())}
-                                  </span>
-                                ))}
-                              </div>
-                            ) : (
-                              <p className="text-faint italic text-sm">Not specified</p>
-                            )}
-                          </td>
-                        </tr>
-
-                        {/* Functions */}
-                        <tr className="bg-paper">
-                          <td className="w-[30%] px-4 py-3 font-semibold text-brand text-sm border-r border-line-light bg-[rgba(255,107,53,0.03)]">
-                            Functions
-                          </td>
-                          <td className="px-4 py-3 border-b border-line-light">
-                            {product.functions?.length > 0 ? (
-                              <div className="flex flex-wrap gap-2">
-                                {product.functions.map((func: string, i: number) => (
-                                  <span key={i} className="px-2 py-1 rounded-md text-xs font-medium bg-[rgba(255,107,53,0.1)] text-brand border border-[rgba(255,107,53,0.2)]">
-                                    {func.replace(/-/g, " ").replace(/\b\w/g, (l: string) => l.toUpperCase())}
-                                  </span>
-                                ))}
-                              </div>
-                            ) : (
-                              <p className="text-faint italic text-sm">Not specified</p>
-                            )}
-                          </td>
-                        </tr>
-
-                        {/* Tags */}
-                        <tr className="bg-white">
-                          <td className="w-[30%] px-4 py-3 font-semibold text-brand text-sm border-r border-line-light bg-[rgba(255,107,53,0.03)]">
-                            Tags
-                          </td>
-                          <td className="px-4 py-3 border-b border-line-light">
-                            {product.tags?.length > 0 ? (
-                              <div className="flex flex-wrap gap-2">
-                                {product.tags.map((tag: string, i: number) => (
-                                  <span key={i} className="px-2 py-1 rounded-md text-xs font-medium bg-[rgba(255,107,53,0.1)] text-brand border border-[rgba(255,107,53,0.2)]">
-                                    {tag.replace(/-/g, " ").replace(/\b\w/g, (l: string) => l.toUpperCase())}
-                                  </span>
-                                ))}
-                              </div>
-                            ) : (
-                              <p className="text-faint italic text-sm">Not specified</p>
-                            )}
-                          </td>
-                        </tr>
-
-                        {/* Countries of Origin */}
-                        <tr className="bg-paper">
-                          <td className="w-[30%] px-4 py-3 font-semibold text-brand text-sm border-r border-line-light bg-[rgba(255,107,53,0.03)]">
-                            Countries of Origin
-                          </td>
-                          <td className="px-4 py-3">
-                            {product.countryOfOrigin?.length > 0 ? (
-                              <div className="flex flex-wrap gap-2">
-                                {product.countryOfOrigin.map((country: string, i: number) => (
-                                  <span key={i} className="px-2 py-1 rounded-md text-xs font-medium bg-[rgba(255,107,53,0.1)] text-brand border border-[rgba(255,107,53,0.2)]">
-                                    {country}
-                                  </span>
-                                ))}
-                              </div>
-                            ) : (
-                              <p className="text-faint italic text-sm">Not specified</p>
-                            )}
-                          </td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                {/* Dietary Attributes / Certifications */}
-                {product.dietaryAttributes?.length > 0 && (
-                  <div className="mb-8">
-                    <h3 className="font-semibold text-body mb-5">Certifications & Attributes</h3>
-                    <div className="flex flex-wrap gap-4">
-                      {product.dietaryAttributes.map((attr: any, i: number) => (
-                        <div
-                          key={i}
-                          className="flex items-center gap-3 p-3 rounded-lg border border-[rgba(255,107,53,0.1)] bg-[rgba(255,107,53,0.05)] transition-all duration-300 min-w-[280px] flex-1"
-                          style={{
-                            cursor: attr.certificateLink ? "pointer" : "default",
-                          }}
-                          onClick={() => attr.certificateLink && window.open(attr.certificateLink, "_blank")}
-                        >
-                          {attr.logo && (
-                            <Image
-                              src={attr.logo}
-                              alt={attr.title}
-                              width={32}
-                              height={32}
-                              style={{ objectFit: "contain", borderRadius: "4px", marginRight: "4px" }}
-                            />
-                          )}
-                          <div>
-                            <p className="font-semibold text-body text-sm">{attr.title}</p>
-                            {attr.certificateLink && (
-                              <p className="text-brand text-[10px]">Click to view certificate</p>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </TabPanel>
-
-            <TabPanel value={tabValue} index={2}>
-              <FAQSection faqs={faqs} isLoading={faqLoading} error={faqError} />
-            </TabPanel>
-          </div>
-        </div>
-
-        {/* Right Side - 35% */}
-        <div className="w-[35%]">
-          {/* Product Title - same height as image */}
-          <div className="h-[400px] flex flex-col">
-            <h2 className="font-semibold text-xl mb-1">
-              {product.name}{" "}
-              /{" "}
-              <span
-                onClick={() => router.push(`/product?category=${product?.category?.slug}`)}
-                className="font-normal text-brand cursor-pointer hover:text-brand-hover hover:underline transition-all"
-              >
-                {product?.category?.name}
-              </span>
-            </h2>
-            <p className="text-dim text-sm mb-6">{product.uniqueId}</p>
-          </div>
-
-          {/* Product Icons / Dietary Attributes */}
-          {features.length > 0 && (
-            <div className="flex flex-wrap gap-4 mb-6">
-              {features.map((feature: any, i: number) => (
-                <div
-                  key={i}
-                  className="flex flex-col items-center text-center transition-all duration-300"
-                  style={{ cursor: feature.certificateLink ? "pointer" : "default" }}
-                  onClick={() => feature.certificateLink && window.open(feature.certificateLink, "_blank")}
-                >
-                  <div className="w-20 h-20 rounded-xl bg-white overflow-hidden flex items-center justify-center mb-1 transition-all duration-300">
-                    {feature.logo ? (
-                      <Image src={feature.logo} alt={feature.label} width={80} height={80} style={{ objectFit: "contain", borderRadius: "4px" }} />
-                    ) : (
-                      <div className="w-6 h-6 rounded-full flex items-center justify-center" style={{ backgroundColor: feature.color }}>
-                        <span className="text-white text-xs font-bold">✓</span>
-                      </div>
-                    )}
-                  </div>
-                  <span className="text-xs font-medium text-dim max-w-[80px] leading-tight">{feature.label}</span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Product Variants Table */}
-          <ProductVariants productId={productId} />
-
-          {/* Quantity Selector and Add to Cart */}
-          <div className="mb-6">
-            <div className="mb-4">
-              <p className="font-semibold text-sm mb-2">Quantity</p>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setCartQuantity(Math.max(minCartQuantity, cartQuantity - minCartQuantity))}
-                  disabled={cartQuantity <= minCartQuantity}
-                  className="w-8 h-8 flex items-center justify-center border border-line-light rounded disabled:opacity-50 hover:border-brand transition-colors"
-                >
-                  <Minus className="w-4 h-4" />
-                </button>
-                <input
-                  type="number"
-                  value={cartQuantity}
-                  min={minCartQuantity}
-                  step={minCartQuantity}
-                  onChange={(e) => {
-                    let value = parseInt(e.target.value) || minCartQuantity;
-                    if (value < minCartQuantity) value = minCartQuantity;
-                    else value = Math.ceil(value / minCartQuantity) * minCartQuantity;
-                    setCartQuantity(value);
-                  }}
-                  className="w-16 h-8 text-center text-sm border border-line-light rounded outline-none focus:border-brand"
-                />
-                <button
-                  onClick={() => setCartQuantity(cartQuantity + minCartQuantity)}
-                  className="w-8 h-8 flex items-center justify-center border border-line-light rounded hover:border-brand transition-colors"
-                >
-                  <Plus className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-
-            {/* Add to Cart Button */}
-            <button
-              onClick={handleAddToCart}
-              disabled={!product.inStock || addToCartMutation.isPending || minCartQuantity <= 1}
-              className="w-full flex items-center justify-center gap-2 py-3 rounded text-white text-sm font-medium transition-colors disabled:opacity-60 mb-4"
-              style={{ backgroundColor: product.inStock ? "var(--color-success)" : "var(--color-line-light)" }}
-            >
-              <ShoppingCart className="w-4 h-4" />
-              {addToCartMutation.isPending ? "Adding..." : product.inStock ? "Add to Cart" : "Out of Stock"}
-            </button>
-          </div>
-
-          {/* Place Enquiry Button */}
-          <button
-            onClick={handlePlaceEnquiry}
-            disabled={!product.inStock}
-            className="w-full py-3 rounded text-white text-sm font-medium transition-colors mb-6 disabled:opacity-60"
-            style={{ backgroundColor: product.inStock ? "var(--color-brand)" : "var(--color-line-light)" }}
-          >
-            {product.inStock ? "Place an Enquiry" : "Out of Stock"}
-          </button>
-
-          {/* Social Icons */}
-          <div className="flex items-center gap-2 mt-4 h-24">
-            <p className="text-xs text-dim mr-1">Add to Wishlist</p>
-            <button
-              onClick={handleWishlistClick}
-              disabled={addToWishlistMutation.isPending || minCartQuantity <= 1}
-              className="p-1.5 text-brand hover:opacity-80 transition-opacity disabled:opacity-50"
-            >
-              <Heart className="w-4 h-4" />
-            </button>
-            <button onClick={() => handleWhatsAppShare(product)} className="p-1.5 text-[#25d366] hover:opacity-80 transition-opacity">
-              <MessageCircle className="w-4 h-4" />
-            </button>
-            <button onClick={() => handleEmailShare(product)} className="p-1.5 text-[#ea4335] hover:opacity-80 transition-opacity">
-              <Mail className="w-4 h-4" />
-            </button>
-            <button className="p-1.5 text-brand hover:opacity-80 transition-opacity">
-              <Share2 className="w-4 h-4" />
-            </button>
-          </div>
-
-          <div className="h-[200px] mt-6" />
-
-          {/* Company Specific Documents Section */}
-          <CompanyDocumentsSection
-            companySpecific={companySpecific}
-            facilitySpecific={facilitySpecific}
-            productSpecific={productSpecific}
-            batchSpecific={batchSpecific}
-            onCompanySpecificChange={setCompanySpecific}
-            onFacilitySpecificChange={setFacilitySpecific}
-            onProductSpecificChange={setProductSpecific}
-            onBatchSpecificChange={setBatchSpecific}
-          />
-
-          {/* Request For Sample Section */}
-          <div className="mt-6">
-            <p className="font-semibold mb-4 text-base">Request For Sample</p>
-            <button
-              className="w-full py-3 rounded text-white text-sm font-medium mb-6 transition-colors hover:opacity-90"
-              style={{ backgroundColor: "var(--color-brand)" }}
-            >
-              Request Now
-            </button>
-            <div className="flex items-center gap-4">
-              <p className="font-medium text-[13px]">Minimum Order Quantity:</p>
-              <input
-                value={product?.moq !== undefined && product?.moq !== null ? `${product.moq} Kg` : ""}
-                disabled
-                className="w-20 h-8 text-center text-xs border border-line-light rounded bg-white px-2"
-              />
-            </div>
+          {/* Full Width: Company Documents */}
+          <div className="mt-12 lg:mt-16">
+            <CompanyDocumentsSection
+              companySpecific={companySpecific}
+              facilitySpecific={facilitySpecific}
+              productSpecific={productSpecific}
+              batchSpecific={batchSpecific}
+              onCompanySpecificChange={setCompanySpecific}
+              onFacilitySpecificChange={setFacilitySpecific}
+              onProductSpecificChange={setProductSpecific}
+              onBatchSpecificChange={setBatchSpecific}
+            />
           </div>
         </div>
       </div>
@@ -638,3 +499,5 @@ export default function ProductDetailPage() {
     </div>
   );
 }
+
+

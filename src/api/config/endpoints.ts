@@ -26,7 +26,7 @@ export const ENDPOINTS = {
   // Product endpoints
   PRODUCTS: {
     LISTING: "/public/products/listing",
-    DETAIL: (id: string) => `/public/products/${id}`,
+    DETAIL: (id: string) => `/public/products/details/${id}`,
     SEARCH: "/public/products/search",
     CATEGORIES: "/public/products/categories",
     VARIANTS: (productId: string) =>

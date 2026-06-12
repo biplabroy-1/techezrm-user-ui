@@ -1,6 +1,6 @@
-﻿"use client";
-import React, { useState } from "react";
-import { ChevronDown, Heart } from "lucide-react";
+"use client";
+import React, { useCallback } from "react";
+import { Search, Heart, Filter, FileText } from "lucide-react";
 import { useProductListing } from "@/api/handlers";
 import { useAppStore } from "@/store/use-app-store";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -11,11 +11,17 @@ import ShimmerLoader from "@/components/ShimmerLoader";
 import FilterShimmerLoader from "@/components/FilterShimmerLoader";
 import ContactFormModal from "@/components/ContactFormModal";
 import RFQModal from "@/components/RFQModal";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
 import { toast } from "react-toastify";
-import { Spinner } from "@/components/ui/spinner";
 
 const ProductPage: React.FC = () => {
   const [page, setPage] = React.useState(1);
+  const [searchQuery, setSearchQuery] = React.useState("");
   const router = useRouter();
   const searchParams = useSearchParams();
   const { customer, isAuthenticated } = useAppStore();
@@ -36,11 +42,8 @@ const ProductPage: React.FC = () => {
   const [selectedTags, setSelectedTags] = React.useState<string[]>(tagFilter ? tagFilter.split(",").filter(Boolean) : []);
   const [selectedFunctions, setSelectedFunctions] = React.useState<string[]>(functionFilter ? functionFilter.split(",").filter(Boolean) : []);
   const [selectedCountries, setSelectedCountries] = React.useState<string[]>(countryFilter ? [countryFilter] : []);
-  const [expandedAccordion, setExpandedAccordion] = useState<string | null>(null);
 
-  const handleAccordionChange = (panel: string) => setExpandedAccordion(expandedAccordion === panel ? null : panel);
-
-  const updateURL = React.useCallback((categories: string[], countries: string[], subCategories: string[], applications: string[], tags: string[], functions: string[]) => {
+  const updateURL = useCallback((categories: string[], countries: string[], subCategories: string[], applications: string[], tags: string[], functions: string[]) => {
     const params = new URLSearchParams();
     if (categories.length > 0) params.set("category", categories.join(","));
     if (countries.length > 0) params.set("country", countries.join(","));
@@ -72,7 +75,7 @@ const ProductPage: React.FC = () => {
   const { data: filtersData, isLoading: filtersLoading } = useFilters();
 
   const productListingParams = {
-    page, limit: 9, sortBy: "createdAt" as const, sortOrder: "desc" as const,
+    page, limit: 12, sortBy: "createdAt" as const, sortOrder: "desc" as const,
     category: selectedCategories.length > 0 ? selectedCategories[0] : undefined,
     subCategory: selectedSubCategories.length > 0 ? selectedSubCategories : undefined,
     application: selectedApplications.length > 0 ? selectedApplications : undefined,
@@ -108,21 +111,53 @@ const ProductPage: React.FC = () => {
 
   const clearAllFilters = () => {
     setSelectedCategories([]); setSelectedSubCategories([]); setSelectedApplications([]); setSelectedTags([]); setSelectedFunctions([]); setSelectedCountries([]); setPage(1);
+    setSearchQuery("");
     updateURL([], [], [], [], [], []);
-  };
-
-  const makeFilterHandler = (slug: string, list: string[], setList: (v: string[]) => void, urlKey: number) => (checked: boolean) => {
-    const next = checked ? [...list, slug] : list.filter((s) => s !== slug);
-    setList(next); setPage(1);
-    const args = [selectedCategories, selectedCountries, selectedSubCategories, selectedApplications, selectedTags, selectedFunctions] as string[][];
-    args[urlKey] = next;
-    updateURL(args[0], args[1], args[2], args[3], args[4], args[5]);
   };
 
   const hasActiveFilters = selectedCategories.length > 0 || selectedSubCategories.length > 0 || selectedApplications.length > 0 || selectedTags.length > 0 || selectedFunctions.length > 0 || selectedCountries.length > 0;
 
   const products = response?.products || [];
   const pagination = response?.pagination;
+
+  const filteredProducts = searchQuery.trim()
+    ? products.filter((p: Product) =>
+        p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        p.description?.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    : products;
+
+  const toggleFilter = (list: string[], setList: (v: string[]) => void, slug: string) => {
+    const next = list.includes(slug) ? list.filter((s) => s !== slug) : [...list, slug];
+    setList(next);
+    setPage(1);
+    return next;
+  };
+
+  const catToggle = (slug: string) => {
+    const next = toggleFilter(selectedCategories, setSelectedCategories, slug);
+    updateURL(next, selectedCountries, selectedSubCategories, selectedApplications, selectedTags, selectedFunctions);
+  };
+  const subCatToggle = (slug: string) => {
+    const next = toggleFilter(selectedSubCategories, setSelectedSubCategories, slug);
+    updateURL(selectedCategories, selectedCountries, next, selectedApplications, selectedTags, selectedFunctions);
+  };
+  const appToggle = (slug: string) => {
+    const next = toggleFilter(selectedApplications, setSelectedApplications, slug);
+    updateURL(selectedCategories, selectedCountries, selectedSubCategories, next, selectedTags, selectedFunctions);
+  };
+  const tagToggle = (slug: string) => {
+    const next = toggleFilter(selectedTags, setSelectedTags, slug);
+    updateURL(selectedCategories, selectedCountries, selectedSubCategories, selectedApplications, next, selectedFunctions);
+  };
+  const funcToggle = (slug: string) => {
+    const next = toggleFilter(selectedFunctions, setSelectedFunctions, slug);
+    updateURL(selectedCategories, selectedCountries, selectedSubCategories, selectedApplications, selectedTags, next);
+  };
+  const countryToggle = (slug: string) => {
+    const next = toggleFilter(selectedCountries, setSelectedCountries, slug);
+    updateURL(selectedCategories, next, selectedSubCategories, selectedApplications, selectedTags, selectedFunctions);
+  };
 
   if (isError) {
     return (
@@ -134,257 +169,216 @@ const ProductPage: React.FC = () => {
     );
   }
 
-  // Accordion filter section helper
-  const FilterSection = ({ panelKey, label, items, selectedItems, onToggle }: { panelKey: string; label: string; items: any[]; selectedItems: string[]; onToggle: (slug: string, checked: boolean) => void }) => {
+  const FilterCheckboxGroup = ({ label, items, selectedItems, onToggle }: { label: string; items: { slug?: string; countryCode?: string; name?: string; productCount?: number }[]; selectedItems: string[]; onToggle: (slug: string) => void }) => {
     if (!items || items.length === 0) return null;
-    const open = expandedAccordion === panelKey;
     return (
-      <div className="bg-[rgba(217,217,217,0.21)] mb-[5px]">
-        <button
-          className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-body hover:bg-[rgba(0,0,0,0.02)] transition-colors"
-          onClick={() => handleAccordionChange(panelKey)}
-        >
-          {label}
-          <ChevronDown className={`w-4 h-4 text-dim transition-transform ${open ? "rotate-180" : ""}`} />
-        </button>
-        {open && (
-          <div className="px-4 pb-3 max-h-[200px] overflow-y-auto scrollbar-thin scrollbar-thumb-[rgba(0,0,0,0.2)] scrollbar-track-transparent">
-            <div className="flex flex-col gap-2">
-              {items.map((item: any) => {
-                const slug = item.slug || item.countryCode;
-                const name = item.name || item.countryCode;
-                const count = item.productCount;
-                const isChecked = selectedItems.includes(slug);
-                return (
-                  <div
-                    key={slug}
-                    className="flex items-center gap-2 cursor-pointer px-2 py-1.5 rounded hover:bg-[rgba(255,107,53,0.08)] hover:translate-x-0.5 transition-all"
-                    onClick={() => onToggle(slug, !isChecked)}
-                  >
-                    <input type="checkbox" checked={isChecked} onChange={() => {}} className="cursor-pointer accent-brand" />
-                    <span className="text-xs text-dim">
-                      {item.emoji ? `${item.emoji} ` : ""}{name}{count > 0 ? ` (${count})` : ""}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  return (
-    <div className="flex min-h-screen bg-surface">
-      {/* Left Sidebar */}
-      <div className="w-[280px] flex flex-col mt-4 ml-4 flex-shrink-0">
-        {/* Filter Header */}
-        <div className="bg-brand text-white px-4 py-3 flex items-center justify-between rounded-[20px_20px_0_0]">
-          <span className="font-semibold text-base">Filters</span>
-          <div className="w-6 h-6 rounded-full bg-white/20 flex items-center justify-center text-xs font-semibold">×</div>
-        </div>
-
-        {/* Filter Sections */}
-        <div className="overflow-y-auto overflow-x-hidden flex-1 [scrollbar-width:thin] [scrollbar-color:rgba(0,0,0,0.2)_transparent] [&::-webkit-scrollbar]:w-[6px] [&::-webkit-scrollbar-thumb]:bg-[rgba(0,0,0,0.2)] [&::-webkit-scrollbar-thumb]:rounded-[3px]">
-          {filtersLoading ? (
-            <FilterShimmerLoader />
-          ) : (
-            <>
-              <FilterSection panelKey="category" label="Category" items={filtersData?.data?.category || []} selectedItems={selectedCategories}
-                onToggle={(slug, checked) => { const next = checked ? [...selectedCategories, slug] : selectedCategories.filter((s) => s !== slug); setSelectedCategories(next); setPage(1); updateURL(next, selectedCountries, selectedSubCategories, selectedApplications, selectedTags, selectedFunctions); }} />
-              <FilterSection panelKey="subCategory" label="Sub Category" items={filtersData?.data?.subCategory || []} selectedItems={selectedSubCategories}
-                onToggle={(slug, checked) => { const next = checked ? [...selectedSubCategories, slug] : selectedSubCategories.filter((s) => s !== slug); setSelectedSubCategories(next); setPage(1); updateURL(selectedCategories, selectedCountries, next, selectedApplications, selectedTags, selectedFunctions); }} />
-              <FilterSection panelKey="application" label="Application" items={filtersData?.data?.application || []} selectedItems={selectedApplications}
-                onToggle={(slug, checked) => { const next = checked ? [...selectedApplications, slug] : selectedApplications.filter((s) => s !== slug); setSelectedApplications(next); setPage(1); updateURL(selectedCategories, selectedCountries, selectedSubCategories, next, selectedTags, selectedFunctions); }} />
-              <FilterSection panelKey="function" label="Function" items={filtersData?.data?.function || []} selectedItems={selectedFunctions}
-                onToggle={(slug, checked) => { const next = checked ? [...selectedFunctions, slug] : selectedFunctions.filter((s) => s !== slug); setSelectedFunctions(next); setPage(1); updateURL(selectedCategories, selectedCountries, selectedSubCategories, selectedApplications, selectedTags, next); }} />
-              <FilterSection panelKey="tag" label="Tags" items={filtersData?.data?.tag || []} selectedItems={selectedTags}
-                onToggle={(slug, checked) => { const next = checked ? [...selectedTags, slug] : selectedTags.filter((s) => s !== slug); setSelectedTags(next); setPage(1); updateURL(selectedCategories, selectedCountries, selectedSubCategories, selectedApplications, next, selectedFunctions); }} />
-              <FilterSection panelKey="countryOfOrigin" label="Country of Origin" items={filtersData?.data?.countryOfOrigin || []} selectedItems={selectedCountries}
-                onToggle={(slug, checked) => { const next = checked ? [...selectedCountries, slug] : selectedCountries.filter((s) => s !== slug); setSelectedCountries(next); setPage(1); updateURL(selectedCategories, next, selectedSubCategories, selectedApplications, selectedTags, selectedFunctions); }} />
-
-              {hasActiveFilters && (
-                <div className="p-4">
-                  <button onClick={clearAllFilters} className="w-full border border-brand text-brand text-xs font-semibold py-2 rounded hover:border-brand-hover hover:bg-[rgba(255,107,53,0.04)] transition-colors">
-                    Clear All Filters
-                  </button>
-                </div>
-              )}
-
-              {(!filtersData?.data?.category || filtersData.data.category.length === 0) && (!filtersData?.data?.countryOfOrigin || filtersData.data.countryOfOrigin.length === 0) && (
-                <div className="p-4"><p className="text-xs text-dim text-center">No filters available</p></div>
-              )}
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* Main Content */}
-      <div className="flex-1 p-6">
-        {/* Header */}
-        <div className="flex flex-col gap-4 mb-6">
-          <div className="flex justify-between items-center">
-            <h1 className="text-2xl font-semibold text-body">Our Products</h1>
-            <div className="flex items-center gap-4">
-              <span className="text-base text-dim font-medium whitespace-nowrap">Total: {response?.pagination?.total || 0}</span>
-              <button onClick={() => setContactModalOpen(true)} className="border border-brand text-brand font-semibold px-4 py-2 rounded hover:border-brand-hover hover:bg-[rgba(255,107,53,0.04)] transition-colors text-sm">
-                Contact Us
-              </button>
-            </div>
-          </div>
-
-          {/* Active filter chips */}
-          {hasActiveFilters && (() => {
-            const allFilters = [
-              ...selectedCategories.map((slug) => ({ type: "Category", slug, name: filtersData?.data?.category?.find((c) => c.slug === slug)?.name || slug, onDelete: () => { const n = selectedCategories.filter((s) => s !== slug); setSelectedCategories(n); setPage(1); updateURL(n, selectedCountries, selectedSubCategories, selectedApplications, selectedTags, selectedFunctions); } })),
-              ...selectedCountries.map((slug) => ({ type: "Country", slug, name: filtersData?.data?.countryOfOrigin?.find((c) => c.countryCode === slug)?.name || slug, onDelete: () => { const n = selectedCountries.filter((s) => s !== slug); setSelectedCountries(n); setPage(1); updateURL(selectedCategories, n, selectedSubCategories, selectedApplications, selectedTags, selectedFunctions); } })),
-              ...selectedSubCategories.map((slug) => ({ type: "Sub Category", slug, name: filtersData?.data?.subCategory?.find((c) => c.slug === slug)?.name || slug, onDelete: () => { const n = selectedSubCategories.filter((s) => s !== slug); setSelectedSubCategories(n); setPage(1); updateURL(selectedCategories, selectedCountries, n, selectedApplications, selectedTags, selectedFunctions); } })),
-              ...selectedApplications.map((slug) => ({ type: "Application", slug, name: filtersData?.data?.application?.find((c) => c.slug === slug)?.name || slug, onDelete: () => { const n = selectedApplications.filter((s) => s !== slug); setSelectedApplications(n); setPage(1); updateURL(selectedCategories, selectedCountries, selectedSubCategories, n, selectedTags, selectedFunctions); } })),
-              ...selectedTags.map((slug) => ({ type: "Tag", slug, name: filtersData?.data?.tag?.find((c) => c.slug === slug)?.name || slug, onDelete: () => { const n = selectedTags.filter((s) => s !== slug); setSelectedTags(n); setPage(1); updateURL(selectedCategories, selectedCountries, selectedSubCategories, selectedApplications, n, selectedFunctions); } })),
-              ...selectedFunctions.map((slug) => ({ type: "Function", slug, name: filtersData?.data?.function?.find((c) => c.slug === slug)?.name || slug, onDelete: () => { const n = selectedFunctions.filter((s) => s !== slug); setSelectedFunctions(n); setPage(1); updateURL(selectedCategories, selectedCountries, selectedSubCategories, selectedApplications, selectedTags, n); } })),
-            ];
-            const maxVisible = 6;
-            const visible = allFilters.slice(0, maxVisible);
-            const remaining = allFilters.length - maxVisible;
-            return (
-              <div className="flex flex-wrap gap-2 items-center max-h-[90px] overflow-y-auto">
-                {visible.map((f, i) => (
-                  <span key={`${f.type}-${f.slug}-${i}`} className="inline-flex items-center gap-1 bg-brand text-white text-xs font-medium h-7 px-3 rounded-full">
-                    {f.type}: {f.name}
-                    <button onClick={f.onDelete} className="ml-1 hover:text-white/70">×</button>
-                  </span>
-                ))}
-                {remaining > 0 && <span className="inline-flex items-center bg-paper text-dim text-xs font-medium h-7 px-3 rounded-full">+{remaining} more</span>}
-              </div>
-            );
-          })()}
-        </div>
-
-        {/* Products Grid */}
-        {isLoading ? (
-          <ShimmerLoader count={9} />
-        ) : products.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 px-8 text-center">
-            <style>{`@keyframes float{0%,100%{transform:translateY(0px) rotate(0deg)}50%{transform:translateY(-15px) rotate(2deg)}}@keyframes fadeInUp{0%{opacity:0;transform:translateY(30px)}100%{opacity:1;transform:translateY(0)}}`}</style>
-            <div className="w-[140px] h-[140px] mb-8" style={{ animation: "float 3s ease-in-out infinite" }}>
-              <div className="w-full h-full bg-gradient-to-br from-surface to-line border-[3px] border-dashed border-line rounded-[20px] flex items-center justify-center shadow-[0_8px_32px_rgba(0,0,0,0.1)]">
-                <div className="w-10 h-10 border-[3px] border-brand rounded-full" />
-              </div>
-            </div>
-            <h2 className="text-2xl font-semibold text-body mb-4" style={{ animation: "fadeInUp 1s ease-out 0.5s both" }}>No Products Found</h2>
-            <p className="text-dim mb-8 max-w-[500px] text-sm" style={{ animation: "fadeInUp 1s ease-out 0.8s both" }}>
-              We couldn't find any products matching your current filters. Try adjusting your search criteria or clear all filters to see all available products.
-            </p>
-            <button onClick={clearAllFilters} className="bg-brand hover:bg-brand-hover text-white px-8 py-3 text-base font-medium rounded-[8px] shadow-[0_4px_12px_rgba(255,107,53,0.3)] hover:shadow-[0_8px_24px_rgba(255,107,53,0.6)] hover:-translate-y-0.5 transition-all" style={{ animation: "fadeInUp 1s ease-out 1.1s both" }}>
-              Clear All Filters
-            </button>
-          </div>
-        ) : (
-          <div className="grid grid-cols-3 gap-4 mb-8">
-            {products.map((product) => {
-              const productInWishlist = isInWishlist(product._id);
+      <>
+        <div>
+          <h3 className="font-medium mb-3 text-sm text-primary">{label}</h3>
+          <div className="flex flex-col gap-2">
+            {items.map((item) => {
+              const slug = item.slug || item.countryCode;
+              const name = item.name || item.countryCode;
+              const count = item.productCount;
+              const checked = selectedItems.includes(slug);
               return (
-                <div
-                  key={product._id}
-                  className="bg-white rounded-[8px] overflow-hidden shadow-[0_2px_8px_rgba(0,0,0,0.1)] relative cursor-pointer hover:shadow-[0_4px_16px_rgba(0,0,0,0.15)] hover:-translate-y-0.5 transition-all"
-                  onClick={() => router.push(`/product/detail/${product._id}`)}
-                >
-                  {/* Product Image */}
-                  <div className="relative h-[180px] overflow-hidden group">
-                    {/* Default Image */}
-                    <div className="default-image absolute inset-0 transition-transform duration-[600ms] cubic-bezier-[0.4,0,0.2,1] group-hover:-translate-x-full">
-                      <Image
-                        src={product.bannerImage ? (product.bannerImage.startsWith("http") ? product.bannerImage : `${process.env.NEXT_PUBLIC_API_URL}/${product.bannerImage}`) : "/placeholder.svg"}
-                        alt={product.name} fill style={{ objectFit: "cover" }}
-                      />
-                    </div>
-                    {/* Hover Image */}
-                    {product.images && product.images.length > 0 && (
-                      <div className="hover-image absolute inset-0 transition-transform duration-[600ms] translate-x-full group-hover:translate-x-0">
-                        <Image
-                          src={product.images[0].startsWith("http") ? product.images[0] : `${process.env.NEXT_PUBLIC_API_URL}/${product.images[0]}`}
-                          alt={product.name} fill style={{ objectFit: "cover" }}
-                        />
-                      </div>
-                    )}
-                    {/* Watermark */}
-                    <span className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-white/70 text-base font-semibold pointer-events-none drop-shadow-sm">EZRM</span>
-                    {/* Heart Icon */}
-                    <button
-                      className="absolute top-2 left-2 z-[2]"
-                      onClick={(e) => handleWishlistToggle(product._id, e)}
-                    >
-                      <Heart className="w-5 h-5" fill={productInWishlist ? "var(--color-danger)" : "none"} stroke={productInWishlist ? "var(--color-danger)" : "white"} />
-                    </button>
-                    {/* Out of Stock Badge */}
-                    {!product.inStock && (
-                      <span className="absolute top-2 right-2 bg-white/90 text-brand text-[11px] h-6 px-2 flex items-center rounded font-semibold">Out of Stock</span>
-                    )}
-                  </div>
-
-                  {/* Product Content */}
-                  <div className="p-4">
-                    <div className="flex justify-between items-start mb-2 gap-2">
-                      <h3 className="text-sm font-semibold text-body leading-snug flex-1 line-clamp-2">{product.name}</h3>
-                      {isAuthenticated && (
-                        <span className="text-brand font-bold text-[0.8rem] bg-[rgba(255,107,53,0.1)] px-1.5 py-0.5 rounded border border-[rgba(255,107,53,0.2)] whitespace-nowrap flex-shrink-0">
-                          ${product.price}/kg
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-dim mb-2 line-clamp-2 leading-snug">{product.description || "Premium, lab-tested raw material trusted by manufacturers."}</p>
-                    <p className="text-[11px] text-faint mb-4">Product Code: {product.uniqueId}</p>
-                    <button
-                      disabled={!product.inStock}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedProduct({ id: product._id, name: product.name });
-                        setRfqModalOpen(true);
-                      }}
-                      className={`w-full py-2 text-xs font-semibold rounded text-white transition-colors ${product.inStock ? "bg-brand hover:bg-brand-hover" : "bg-line-light cursor-not-allowed"}`}
-                    >
-                      Get Quote
-                    </button>
-                  </div>
+                <div key={slug} className="flex items-center gap-2">
+                  <Checkbox
+                    id={`filter-${label}-${slug}`}
+                    checked={checked}
+                    onCheckedChange={() => onToggle(slug)}
+                  />
+                  <Label
+                    htmlFor={`filter-${label}-${slug}`}
+                    className="text-xs sm:text-sm font-normal cursor-pointer"
+                  >
+                    {name}
+                    {count > 0 && <span className="text-muted-foreground ml-1">({count})</span>}
+                  </Label>
                 </div>
               );
             })}
           </div>
-        )}
+        </div>
+        <Separator />
+      </>
+    );
+  };
 
-        {/* Pagination */}
-        {pagination && pagination.totalPages > 1 && (
-          <div className="flex justify-center mt-8 gap-2">
-            {Array.from({ length: pagination.totalPages }, (_, i) => i + 1).map((p) => (
-              <button
-                key={p}
-                onClick={() => setPage(p)}
-                className={`w-9 h-9 rounded text-sm font-medium transition-colors ${p === page ? "bg-brand text-white" : "text-dim hover:bg-wash"}`}
-              >
-                {p}
-              </button>
-            ))}
+  return (
+    <div className="min-h-screen bg-background">
+      <div className="py-20 sm:py-24 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-7xl mx-auto">
+          {/* Header with search */}
+          <div className="mb-6 sm:mb-8 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-8">
+            <h1 className="text-2xl sm:text-3xl font-bold text-foreground">
+              Our Products
+            </h1>
+            <div className="relative w-full sm:max-w-2xl sm:flex-1 sm:mx-auto">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={18} />
+              <Input
+                type="text"
+                placeholder="Search products..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10 w-full"
+              />
+            </div>
+            <Button
+              onClick={() => setContactModalOpen(true)}
+              className="w-full sm:w-auto gap-2 whitespace-nowrap"
+            >
+              <FileText size={16} />
+              Request Brochure
+            </Button>
           </div>
-        )}
 
-        {/* Modals */}
-        <ContactFormModal
-          open={contactModalOpen}
-          onClose={() => setContactModalOpen(false)}
-          source="product_page"
-          onSuccess={() => toast.success("Thank you! Your message has been sent successfully.")}
-          onError={(error) => toast.error(error)}
-        />
-        <RFQModal
-          open={rfqModalOpen}
-          onClose={() => { setRfqModalOpen(false); setSelectedProduct(null); }}
-          productId={selectedProduct?.id}
-          productName={selectedProduct?.name || ""}
-          onSuccess={() => toast.success("Thank you! Your RFQ has been submitted successfully.")}
-          onError={(error) => toast.error(error)}
-        />
+          <div className="flex flex-col md:flex-row gap-4 sm:gap-8">
+            {/* Filters Sidebar */}
+            <div className="w-full md:w-64 md:flex-shrink-0">
+              <div className="md:sticky md:top-24 border border-border rounded-lg p-3 sm:p-4">
+                <div className="flex items-center justify-between mb-3 sm:mb-4">
+                  <h2 className="font-semibold flex items-center gap-2 text-sm sm:text-base">
+                    <Filter size={16} />
+                    Filters
+                  </h2>
+                  {hasActiveFilters && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={clearAllFilters}
+                      className="text-xs"
+                    >
+                      Clear All
+                    </Button>
+                  )}
+                </div>
+                <div className="max-h-[320px] md:max-h-[calc(100vh-200px)] overflow-y-auto pr-1 scrollbar-thin">
+                  {filtersLoading ? (
+                    <FilterShimmerLoader />
+                  ) : (
+                    <div className="space-y-4 sm:space-y-6">
+                      <FilterCheckboxGroup label="Category" items={filtersData?.data?.category || []} selectedItems={selectedCategories} onToggle={catToggle} />
+                      <FilterCheckboxGroup label="Sub Category" items={filtersData?.data?.subCategory || []} selectedItems={selectedSubCategories} onToggle={subCatToggle} />
+                      <FilterCheckboxGroup label="Application" items={filtersData?.data?.application || []} selectedItems={selectedApplications} onToggle={appToggle} />
+                      <FilterCheckboxGroup label="Function" items={filtersData?.data?.function || []} selectedItems={selectedFunctions} onToggle={funcToggle} />
+                      <FilterCheckboxGroup label="Tags" items={filtersData?.data?.tag || []} selectedItems={selectedTags} onToggle={tagToggle} />
+                      <FilterCheckboxGroup label="Country of Origin" items={filtersData?.data?.countryOfOrigin || []} selectedItems={selectedCountries} onToggle={countryToggle} />
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Products Grid */}
+            <div className="flex-1">
+              {isLoading ? (
+                <ShimmerLoader count={12} />
+              ) : filteredProducts.length === 0 ? (
+                <div className="text-center py-8 sm:py-12">
+                  <p className="text-muted-foreground">
+                    {searchQuery
+                      ? `No results for "${searchQuery}". Try a different search term.`
+                      : "No products found matching your criteria."}
+                  </p>
+                  {(hasActiveFilters || searchQuery) && (
+                    <Button
+                      variant="outline"
+                      onClick={() => { clearAllFilters(); }}
+                      className="mt-4"
+                    >
+                      {searchQuery ? "Clear Search" : "Clear All Filters"}
+                    </Button>
+                  )}
+                </div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-6">
+                    {filteredProducts.map((product: Product, index: number) => (
+                      <div
+                        key={product._id}
+                        className="group cursor-pointer"
+                        style={{ animation: `fadeInUp 0.4s ease-out ${index * 0.05}s both` }}
+                        onClick={() => router.push(`/product/detail/${product._id}`)}
+                      >
+                        <Card className="overflow-hidden hover:shadow-lg transition-shadow group h-full">
+                          <div className="relative h-32 sm:h-48 overflow-hidden">
+                            <Image
+                              src={product.bannerImage ? (product.bannerImage.startsWith("http") ? product.bannerImage : `${process.env.NEXT_PUBLIC_API_URL}/${product.bannerImage}`) : "/placeholder.svg"}
+                              alt={product.name}
+                              fill
+                              className="object-cover group-hover:scale-110 transition-transform duration-500"
+                            />
+                            <button
+                              className="absolute top-2 left-2 w-8 h-8 rounded-full bg-white/80 backdrop-blur-sm flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-white z-10"
+                              onClick={(e) => handleWishlistToggle(product._id, e)}
+                            >
+                              <Heart className={`w-4 h-4 ${isInWishlist(product._id) ? "fill-red-500 stroke-red-500" : "stroke-foreground"}`} />
+                            </button>
+                            {!product.inStock && (
+                              <span className="absolute top-2 right-2 text-xs font-medium text-white bg-red-500/80 px-2 py-0.5 rounded-full">
+                                Out of Stock
+                              </span>
+                            )}
+                          </div>
+                          <div className="p-3 sm:p-4">
+                            <h3 className="text-sm sm:text-base font-semibold mb-1 sm:mb-2 line-clamp-2">{product.name}</h3>
+                            <p className="text-xs sm:text-sm text-muted-foreground line-clamp-2 sm:line-clamp-3">{product.description || "Premium, lab-tested raw material trusted by manufacturers."}</p>
+                            {product.appearance && (
+                              <div className="flex flex-wrap gap-1 mt-2">
+                                <span className="text-[10px] sm:text-xs px-1.5 py-0.5 bg-muted rounded-full text-muted-foreground">
+                                  {product.appearance}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        </Card>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Pagination */}
+                  {pagination && pagination.totalPages > 1 && (
+                    <div className="flex justify-center items-center gap-2 mt-12">
+                      {Array.from({ length: pagination.totalPages }, (_, i) => i + 1).map((p) => (
+                        <button
+                          key={p}
+                          onClick={() => setPage(p)}
+                          className={`w-9 h-9 text-sm rounded-lg font-medium transition-colors ${
+                            p === page
+                              ? "bg-primary text-primary-foreground"
+                              : "text-muted-foreground hover:bg-muted"
+                          }`}
+                        >
+                          {p}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
+
+      <style>{`@keyframes fadeInUp{0%{opacity:0;transform:translateY(20px)}100%{opacity:1;transform:translateY(0)}}`}</style>
+
+      <ContactFormModal
+        open={contactModalOpen}
+        onClose={() => setContactModalOpen(false)}
+        source="product_page"
+        onSuccess={() => toast.success("Thank you! Your message has been sent successfully.")}
+        onError={(error) => toast.error(error)}
+      />
+      <RFQModal
+        open={rfqModalOpen}
+        onClose={() => { setRfqModalOpen(false); setSelectedProduct(null); }}
+        productId={selectedProduct?.id}
+        productName={selectedProduct?.name || ""}
+        onSuccess={() => toast.success("Thank you! Your RFQ has been submitted successfully.")}
+        onError={(error) => toast.error(error)}
+      />
     </div>
   );
 };
