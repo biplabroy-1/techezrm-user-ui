@@ -4,7 +4,6 @@ export * from "./productDetailsHandler";
 export * from "./productVariantsHandler";
 
 // Authentication handlers
-export * from "./authHandler";
 export * from "./customerAuthHandler";
 export * from "./customerSignupHandler";
 

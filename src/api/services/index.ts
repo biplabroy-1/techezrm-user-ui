@@ -1,5 +1,4 @@
 export { productService } from "./products";
-export { authService } from "./authService";
 export { orderService } from "./orders";
 export { reviewService } from "./reviews";
 export { customerAuthService } from "./customerAuth";
@@ -25,7 +24,6 @@ export * from "./productDetails";
 export * from "./productVariants";
 
 // Authentication services
-export * from "./authService";
 export * from "./customerAuth";
 export * from "./customerSignup";
 
@@ -50,12 +48,6 @@ export type {
   ProductsResponse,
   ProductListingParams,
 } from "./products";
-export type {
-  User,
-  LoginCredentials,
-  RegisterData,
-  AuthResponse,
-} from "./authService";
 export type { Order, OrderItem, CreateOrderData } from "./orders";
 export type {
   CustomerReview,
