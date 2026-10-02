@@ -95,8 +95,14 @@ const AddressManagementPage: React.FC = () => {
     setSelectedAddress(null);
   };
 
-  const openGoogleMaps = (latitude: string, longitude: string) => {
-    const url = `https://www.google.com/maps?q=${latitude},${longitude}`;
+  /**
+   * Opens these coordinates in a consumer map app.
+   *
+   * A plain website deep link, not a Maps API call - it needs no key and costs nothing.
+   * Pointed at OpenStreetMap for consistency with the basemap the rest of the app uses.
+   */
+  const openInMaps = (latitude: string, longitude: string) => {
+    const url = `https://www.openstreetmap.org/?mlat=${latitude}&mlon=${longitude}#map=16/${latitude}/${longitude}`;
     window.open(url, "_blank");
   };
 
@@ -370,11 +376,11 @@ const AddressManagementPage: React.FC = () => {
                           </div>
                         </div>
                         <button
-                          onClick={() => openGoogleMaps(selectedAddress.coordinates.latitude, selectedAddress.coordinates.longitude)}
+                          onClick={() => openInMaps(selectedAddress.coordinates.latitude, selectedAddress.coordinates.longitude)}
                           className="flex items-center gap-2 px-4 py-1.5 rounded-xl text-white text-xs font-medium transition-opacity hover:opacity-90"
                           style={{ background: "linear-gradient(135deg, var(--color-brand) 0%, var(--color-brand-hover) 100%)" }}
                         >
-                          <Map className="w-3.5 h-3.5" /> Open in Google Maps
+                          <Map className="w-3.5 h-3.5" /> Open in Maps
                         </button>
                       </div>
                     </div>

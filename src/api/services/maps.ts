@@ -15,15 +15,31 @@ export interface GeocodeResult {
 }
 
 export interface AutocompleteResult {
+  /**
+   * An OpenStreetMap element id, e.g. "w:23733659". NOT a Google "ChIJ..." string -
+   * this changed when maps moved off Google, so any id persisted before that is invalid
+   * and must be looked up again.
+   */
   place_id: string;
   description: string;
   structured_formatting: {
     main_text: string;
     secondary_text: string;
   };
+  /**
+   * Present on every suggestion, which is why selecting one needs no second request.
+   * Optional only because older cached responses may predate this field.
+   */
+  geometry?: {
+    location: {
+      lat: number;
+      lng: number;
+    };
+  };
 }
 
 export interface PlaceDetails {
+  /** OpenStreetMap element id, e.g. "w:23733659". */
   place_id: string;
   name?: string;
   formatted_address?: string;
@@ -33,12 +49,10 @@ export interface PlaceDetails {
       lng: number;
     };
   };
-  rating?: number;
-  user_ratings_total?: number;
-  photos?: Array<{
-    photo_reference: string;
-    height: number;
-    width: number;
+  address_components?: Array<{
+    long_name: string;
+    short_name: string;
+    types: string[];
   }>;
 }
 
@@ -100,19 +114,22 @@ class MapsService {
   /**
    * Get place autocomplete suggestions
    */
+  /**
+   * Get place autocomplete suggestions.
+   *
+   * `radius` and `types` were Google parameters. The OpenStreetMap providers bias by
+   * coordinate pair rather than by radius and have no Google place-type taxonomy, so
+   * neither is sent - passing them would suggest a filtering that is not happening.
+   */
   async getAutocompleteSuggestions(
     input: string,
     lat?: number,
-    lng?: number,
-    radius?: number,
-    types?: string
+    lng?: number
   ): Promise<AutocompleteResult[]> {
     try {
       const params: any = { input };
       if (lat !== undefined) params.lat = lat;
       if (lng !== undefined) params.lng = lng;
-      if (radius !== undefined) params.radius = radius;
-      if (types !== undefined) params.types = types;
 
       const response = await axios.get<ApiResponse<AutocompleteResult[]>>(
         `${this.baseURL}/autocomplete`,
@@ -130,19 +147,16 @@ class MapsService {
   }
 
   /**
-   * Get detailed information about a place
+   * Get detailed information about a place by its OpenStreetMap element id.
+   *
+   * No `fields` parameter: the OSM providers have no field-masking concept, and the
+   * previous Google field list (rating, photos, opening hours) has no equivalent here.
    */
-  async getPlaceDetails(
-    placeId: string,
-    fields?: string
-  ): Promise<PlaceDetails> {
+  async getPlaceDetails(placeId: string): Promise<PlaceDetails> {
     try {
-      const params: any = { placeId };
-      if (fields !== undefined) params.fields = fields;
-
       const response = await axios.get<ApiResponse<PlaceDetails>>(
         `${this.baseURL}/place-details`,
-        { params }
+        { params: { placeId } }
       );
 
       if (response.data.success) {

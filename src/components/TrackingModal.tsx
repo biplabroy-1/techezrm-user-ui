@@ -1,14 +1,14 @@
 ﻿"use client";
 
-import React from "react";
+import React, { useEffect, useMemo, useRef } from "react";
 import { X, CheckCircle2, Clock, Circle } from "lucide-react";
-import {
-  GoogleMap,
-  Marker,
-  Polyline,
-  useLoadScript,
-} from "@react-google-maps/api";
+import { MapContainer, TileLayer, Marker, Polyline, useMap } from "react-leaflet";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
 import { formatDate } from "@/utils/dateUtils";
+
+/** Leaflet needs the map instance once mounted, and it only exists inside MapContainer. */
+type LeafletMap = L.Map;
 
 const getMarkerColor = (status: "completed" | "current" | "pending") => {
   switch (status) {
@@ -18,6 +18,42 @@ const getMarkerColor = (status: "completed" | "current" | "pending") => {
     default: return "var(--color-brand)";
   }
 };
+
+/** Leaflet's default marker images resolve relative to the CSS, which breaks under bundlers. */
+delete (L.Icon.Default.prototype as any)._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl:
+    "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png",
+  iconUrl:
+    "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png",
+  shadowUrl:
+    "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png",
+});
+
+/**
+ * Status-coloured emoji pin, as an HTML div icon.
+ *
+ * Was an inline SVG data URI under Google Maps. `divIcon` takes HTML instead, which is
+ * closer to how `admin-ui`'s RouteMap renders its markers and lets the CSS variables
+ * resolve normally rather than inside a serialised SVG.
+ */
+const createPinIcon = (status: string, emoji: string) =>
+  L.divIcon({
+    className: "",
+    html: `<div style="width:40px;height:40px;border-radius:50%;background-color:${getMarkerColor(
+      status as "completed" | "current" | "pending"
+    )};border:3px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;font-size:16px;cursor:pointer">${emoji}</div>`,
+    iconSize: [40, 40],
+    iconAnchor: [20, 20],
+  });
+
+/** The moving dot shown during the journey animation. */
+const movingDotIcon = L.divIcon({
+  className: "",
+  html: `<div style="width:20px;height:20px;border-radius:50%;background-color:var(--color-brand);border:2px solid white;box-shadow:0 2px 4px rgba(0,0,0,0.3)"></div>`,
+  iconSize: [20, 20],
+  iconAnchor: [10, 10],
+});
 
 interface TrackingData {
   id: number;
@@ -51,82 +87,157 @@ const statusBadge = (status: string) => {
   return "bg-gray-100 text-gray-700 border border-gray-300";
 };
 
+/**
+ * Fits the route after the map has laid out.
+ *
+ * `fitBounds` on mount is unreliable because the container has zero height at that point,
+ * producing a garbage fit. `whenReady` fires once Leaflet has real dimensions, and
+ * `invalidateSize` forces a re-measure of the container that was hidden while the modal
+ * was closed.
+ */
+const FitOnMount: React.FC<{
+  positions: Array<[number, number]>;
+  maxZoom: number;
+}> = ({ positions, maxZoom }) => {
+  const map = useMap();
+  useEffect(() => {
+    // Uses the `map` from useMap rather than a ref passed down, so the fit does not
+    // depend on the parent's ref having been assigned yet - child effects can run before
+    // it, and a null ref here silently skips the initial fit.
+    map.whenReady(() => {
+      map.invalidateSize();
+      if (positions.length === 0) return;
+      if (positions.length === 1) {
+        map.setView(positions[0], maxZoom);
+        return;
+      }
+      map.fitBounds(L.latLngBounds(positions), { padding: [50, 50] });
+      if (map.getZoom() > maxZoom) map.setZoom(maxZoom);
+    });
+    // Intentionally runs once: later changes are handled by the Fit-to-Route button.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return null;
+};
+
 const TrackingModal: React.FC<TrackingModalProps> = ({ open, onClose, trackingNumber, trackingData, trackingPoints }) => {
-  const [mapState, setMapState] = React.useState({ center: { lat: 0, lng: 0 }, zoom: 2 });
-  const [mapRef, setMapRef] = React.useState<google.maps.Map | null>(null);
   const [selectedLocation, setSelectedLocation] = React.useState<number | null>(null);
   const [isZooming, setIsZooming] = React.useState(false);
   const [isAnimating, setIsAnimating] = React.useState(false);
   const [currentAnimationIndex, setCurrentAnimationIndex] = React.useState(0);
   const [movingDotPosition, setMovingDotPosition] = React.useState<{ lat: number; lng: number } | null>(null);
 
-  const { isLoaded, loadError } = useLoadScript({
-    googleMapsApiKey: process.env.NEXT_PUBLIC_MAPS_API_KEY || "AIzaSyAzEg_-JsYTeeI7OTXghH1utbSFCJ5IlOg",
-    libraries: ["places"],
-  });
+  /**
+   * How far out the map may zoom when fitting the whole route.
+   *
+   * A shipment route spans a country, and `fitBounds` on such a spread lands at zoom 5 or
+   * so, where individual stops are unreadable and the line looks like a single dot. This
+   * cap forces at least a regional view, matching what the Google version did with its
+   * `bounds_changed` listener.
+   */
+  const MAX_FIT_ZOOM = 8;
 
-  const handleMapLoad = (map: google.maps.Map) => {
-    setMapRef(map);
-    if (trackingPoints && trackingPoints.length > 0) {
-      const bounds = new google.maps.LatLngBounds();
-      trackingPoints.forEach((point) => {
-        if (point?.lat && point?.lng) bounds.extend(new google.maps.LatLng(point.lat, point.lng));
-      });
-      map.fitBounds(bounds, { top: 50, right: 50, bottom: 50, left: 50 });
-      const listener = google.maps.event.addListener(map, "bounds_changed", () => {
-        const z = map.getZoom();
-        if (z && z > 8) map.setZoom(8);
-        google.maps.event.removeListener(listener);
-      });
-    }
-  };
+  const routePositions = useMemo(
+    () =>
+      (trackingPoints ?? [])
+        .filter((p) => typeof p?.lat === "number" && typeof p?.lng === "number")
+        .map((p) => [p.lat, p.lng] as [number, number]),
+    [trackingPoints]
+  );
 
-  const handleFitToRoute = () => {
-    if (mapRef && trackingPoints && trackingPoints.length > 0) {
-      const bounds = new google.maps.LatLngBounds();
-      trackingPoints.forEach((p) => { if (p?.lat && p?.lng) bounds.extend(new google.maps.LatLng(p.lat, p.lng)); });
-      mapRef.fitBounds(bounds, { top: 50, right: 50, bottom: 50, left: 50 });
-      const listener = google.maps.event.addListener(mapRef, "bounds_changed", () => {
-        const z = mapRef.getZoom();
-        if (z && z > 8) mapRef.setZoom(8);
-        google.maps.event.removeListener(listener);
-      });
-    }
-  };
+  /**
+   * Imperative map operations (fit-to-route, fly to a point) live in a ref, not state.
+   * Storing the Leaflet instance in state caused a re-render on every map interaction,
+   * which is both wasteful and a way to get render loops.
+   */
+  const mapRef = useRef<LeafletMap | null>(null);
+
+  /**
+   * Timer for the journey animation.
+   *
+   * Tracked so that stopping mid-run, closing the modal, or unmounting cannot leave a
+   * queued tick that fires against a cancelled animation or a torn-down map.
+   */
+  const animationTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    if (open) mapRef.current?.invalidateSize();
+  }, [open]);
+
+  // Without this, closing the modal mid-animation leaves a queued setTimeout that fires
+  // against a map Leaflet has already torn down.
+  useEffect(
+    () => () => {
+      if (animationTimerRef.current) clearTimeout(animationTimerRef.current);
+    },
+    []
+  );
 
   const startJourneyAnimation = () => {
     if (!trackingData || trackingData.length === 0 || isAnimating) return;
     setIsAnimating(true);
     setCurrentAnimationIndex(0);
+
     const animateToNextPoint = (index: number) => {
-      if (index >= trackingData.length) { setIsAnimating(false); setMovingDotPosition(null); return; }
+      if (index >= trackingData.length) {
+        setIsAnimating(false);
+        setMovingDotPosition(null);
+        return;
+      }
       const point = trackingData[index];
-      if (point?.coordinates && mapRef) {
+      if (point?.coordinates) {
+        // coordinates are [lng, lat] - GeoJSON order, which is easy to invert by mistake
+        // and drops the marker at the wrong side of the world.
         const [lng, lat] = point.coordinates;
         setSelectedLocation(point.id);
         setMovingDotPosition({ lat, lng });
-        mapRef.panTo({ lat, lng });
-        setTimeout(() => { setCurrentAnimationIndex(index + 1); animateToNextPoint(index + 1); }, 2000);
+        mapRef.current?.panTo([lat, lng]);
+        animationTimerRef.current = setTimeout(() => {
+          setCurrentAnimationIndex(index + 1);
+          animateToNextPoint(index + 1);
+        }, 2000);
       }
     };
     animateToNextPoint(0);
   };
 
-  const stopJourneyAnimation = () => { setIsAnimating(false); setCurrentAnimationIndex(0); setMovingDotPosition(null); };
+  const stopJourneyAnimation = () => {
+    if (animationTimerRef.current) {
+      clearTimeout(animationTimerRef.current);
+      animationTimerRef.current = null;
+    }
+    setIsAnimating(false);
+    setCurrentAnimationIndex(0);
+    setMovingDotPosition(null);
+  };
+
+  /**
+   * Centres the map on every tracking point, capped at a readable zoom.
+   *
+   * `fitBounds` panics on an empty list, and a single point has no extent to fit, so
+   * both cases fall back to `setView`.
+   */
+  const fitToRoute = () => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (routePositions.length === 0) return;
+    if (routePositions.length === 1) {
+      map.setView(routePositions[0], MAX_FIT_ZOOM);
+      return;
+    }
+    map.fitBounds(L.latLngBounds(routePositions), { padding: [50, 50] });
+    if (map.getZoom() > MAX_FIT_ZOOM) map.setZoom(MAX_FIT_ZOOM);
+  };
 
   const handleLocationClick = (point: TrackingData) => {
-    if (mapRef && point?.coordinates) {
-      const [lng, lat] = point.coordinates;
-      setSelectedLocation(point?.id);
-      setIsZooming(true);
-      const zoomLevel = point.status === "current" ? 10 : 8;
-      mapRef.panTo({ lat, lng });
-      setTimeout(() => {
-        mapRef.setZoom(zoomLevel);
-        setTimeout(() => setIsZooming(false), 500);
-      }, 300);
-      setMapState({ center: { lat, lng }, zoom: zoomLevel });
-    }
+    if (!point?.coordinates) return;
+    // coordinates are [lng, lat].
+    const [lng, lat] = point.coordinates;
+    setSelectedLocation(point?.id);
+    setIsZooming(true);
+    const zoomLevel = point.status === "current" ? 10 : 8;
+    mapRef.current?.flyTo([lat, lng], zoomLevel, { duration: 0.6 });
+    setTimeout(() => setIsZooming(false), 800);
   };
 
   if (!open) return null;
@@ -159,63 +270,88 @@ const TrackingModal: React.FC<TrackingModalProps> = ({ open, onClose, trackingNu
           <div className="flex flex-1 overflow-hidden">
             {/* Map */}
             <div className="flex-1 relative bg-wash min-h-[500px] overflow-hidden">
-              {loadError && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center text-dim z-10">
-                  <p className="text-lg font-medium">Error loading map</p>
-                  <p className="text-sm">Please check your Google Maps API key</p>
-                </div>
-              )}
-              {!isLoaded ? (
-                <div className="absolute inset-0 flex items-center justify-center text-dim z-10">
-                  <p className="text-lg">Loading map...</p>
-                </div>
-              ) : (
-                <div className="h-[500px] w-full">
-                  <GoogleMap
-                    mapContainerStyle={{ width: "100%", height: "100%" }}
-                    center={mapState.center}
-                    zoom={mapState.zoom}
-                    onLoad={handleMapLoad}
-                    options={{ styles: [{ featureType: "poi", elementType: "labels", stylers: [{ visibility: "off" }] }], disableDefaultUI: false, zoomControl: true, mapTypeControl: true, scaleControl: true, streetViewControl: false, rotateControl: false, fullscreenControl: true }}
-                  >
-                    {trackingPoints && trackingPoints.length > 1 && (
-                      <Polyline path={trackingPoints.map((p) => ({ lat: p?.lat || 0, lng: p?.lng || 0 }))} options={{ strokeColor: "var(--color-brand)", strokeOpacity: 1.0, strokeWeight: 5, geodesic: true, clickable: false, zIndex: 1 }} />
-                    )}
-                    {movingDotPosition && (
-                      <Marker position={movingDotPosition} icon={{ url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`<svg width="20" height="20" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="8" fill="var(--color-brand)" stroke="white" stroke-width="2"/><circle cx="10" cy="10" r="4" fill="white"/></svg>`)}`, scaledSize: new google.maps.Size(20, 20), anchor: new google.maps.Point(10, 10) }} options={{ clickable: false, zIndex: 10 }} />
-                    )}
-                    {trackingPoints?.map((point, index) => (
-                      <Marker
-                        key={index}
-                        position={{ lat: point?.lat || 0, lng: point?.lng || 0 }}
-                        icon={{ url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`<svg width="40" height="40" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><circle cx="20" cy="20" r="18" fill="${getMarkerColor(point?.status || "pending")}" stroke="white" stroke-width="3"/><text x="20" y="26" text-anchor="middle" fill="white" font-size="16" font-family="Arial">${point?.icon || "📍"}</text></svg>`)}`, scaledSize: new google.maps.Size(40, 40), anchor: new google.maps.Point(20, 20) }}
-                        onClick={() => { const td = trackingData?.find((t) => t?.coordinates?.[0] === point?.lng && t?.coordinates?.[1] === point?.lat); if (td) handleLocationClick(td); }}
-                      />
-                    ))}
-                  </GoogleMap>
-                </div>
-              )}
+              <div className="h-[500px] w-full">
+                <MapContainer
+                  center={routePositions[0] ?? [0, 0]}
+                  zoom={2}
+                  style={{ height: "100%", width: "100%" }}
+                  ref={mapRef}
+                >
+                  <TileLayer
+                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                  />
+                  {/* Fit the route once the map exists and has real dimensions. */}
+                  <FitOnMount positions={routePositions} maxZoom={MAX_FIT_ZOOM} />
+
+                  {/*
+                    Straight segments between stops. The Google version asked for
+                    `geodesic: true`, which curved the line along great circles; Leaflet
+                    has no equivalent. For the distances involved the two are visually
+                    near-identical, and inventing a curve here would misrepresent the
+                    actual path.
+                  */}
+                  {routePositions.length > 1 && (
+                    <Polyline
+                      positions={routePositions}
+                      pathOptions={{
+                        color: "#ff6b35",
+                        opacity: 1.0,
+                        weight: 5,
+                        // Leaflet names this `interactive`, not `clickable`.
+                        interactive: false,
+                      }}
+                    />
+                  )}
+                  {movingDotPosition && (
+                    <Marker
+                      position={[movingDotPosition.lat, movingDotPosition.lng]}
+                      icon={movingDotIcon}
+                      interactive={false}
+                      zIndexOffset={1000}
+                    />
+                  )}
+                  {trackingPoints?.map((point, index) => (
+                    <Marker
+                      key={index}
+                      position={[point?.lat ?? 0, point?.lng ?? 0]}
+                      icon={createPinIcon(point?.status || "pending", point?.icon || "📍")}
+                      eventHandlers={{
+                        click: () => {
+                          const td = trackingData?.find(
+                            (t) =>
+                              t?.coordinates?.[0] === point?.lng &&
+                              t?.coordinates?.[1] === point?.lat
+                          );
+                          if (td) handleLocationClick(td);
+                        },
+                      }}
+                    />
+                  ))}
+                </MapContainer>
+              </div>
 
               {/* Custom controls */}
-              {isLoaded && (
-                <div className="absolute bottom-4 left-4 flex flex-col gap-2 z-[1000]">
-                  <button
-                    onClick={isAnimating ? stopJourneyAnimation : startJourneyAnimation}
-                    title={isAnimating ? "Stop Journey" : "Start Journey"}
-                    className="w-10 h-10 rounded flex items-center justify-center text-white text-base font-bold transition-all hover:scale-[1.08]"
-                    style={{ backgroundColor: isAnimating ? "var(--color-danger)" : "var(--color-success)", boxShadow: `0 2px 8px ${isAnimating ? "rgba(220,53,69,0.3)" : "rgba(40,167,69,0.3)"}` }}
-                  >
-                    {isAnimating ? "⏹️" : "▶️"}
-                  </button>
-                  <button
-                    onClick={handleFitToRoute}
-                    title="Fit to Route"
-                    className="w-10 h-10 bg-brand rounded flex items-center justify-center text-base font-bold text-white shadow-[0_2px_8px_rgba(255,107,53,0.3)] hover:bg-brand-hover hover:scale-[1.08] transition-all"
-                  >
-                    🗺️
-                  </button>
-                </div>
-              )}
+              <div className="absolute bottom-4 left-4 flex flex-col gap-2 z-[1000]">
+                <button
+                  onClick={isAnimating ? stopJourneyAnimation : startJourneyAnimation}
+                  title={isAnimating ? "Stop Journey" : "Start Journey"}
+                  className="w-10 h-10 rounded flex items-center justify-center text-white text-base font-bold transition-all hover:scale-[1.08]"
+                  style={{
+                    backgroundColor: isAnimating ? "var(--color-danger)" : "var(--color-success)",
+                    boxShadow: `0 2px 8px ${isAnimating ? "rgba(220,53,69,0.3)" : "rgba(40,167,69,0.3)"}`,
+                  }}
+                >
+                  {isAnimating ? "⏹️" : "▶️"}
+                </button>
+                <button
+                  onClick={fitToRoute}
+                  title="Fit to Route"
+                  className="w-10 h-10 bg-brand rounded flex items-center justify-center text-base font-bold text-white shadow-[0_2px_8px_rgba(255,107,53,0.3)] hover:bg-brand-hover hover:scale-[1.08] transition-all"
+                >
+                  🗺️
+                </button>
+              </div>
             </div>
 
             {/* Tracking History */}
