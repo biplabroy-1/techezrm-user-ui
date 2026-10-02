@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 400" width="600" height="400" role="img" aria-label="Image placeholder">
+  <!--
+    Neutral placeholder for a product or listing with no image.
+
+    Referenced from six places across admin-ui and user-ui and previously missing
+    from both public/ folders, so every one of them rendered a broken image:
+      admin-ui  the back control on /admin/inventory/delete
+      admin-ui  the sidebar icon fallback, `item.icon || '/placeholder.svg'`, so any
+                nav entry without its own icon showed a torn page
+      user-ui   product cards with no banner, and the detail page's placeholder
+      user-ui   the certifications strip and the favourites tile
+
+    Vector rather than a PNG so it is a few hundred bytes, scales to any box
+    without a second asset, and needs no build step.
+  -->
+  <rect width="600" height="400" fill="#EEF1F5"/>
+  <g fill="none" stroke="#C3CBD5" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="150" y="130" width="300" height="190" rx="14"/>
+    <path d="M150 268l62-58 52 46 60-70 76 82"/>
+  </g>
+  <circle cx="240" cy="182" r="20" fill="#C3CBD5"/>
+</svg>
