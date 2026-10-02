@@ -174,9 +174,16 @@ const MapSelector: React.FC<MapSelectorProps> = ({
    */
   const handleSuggestionSelect = useCallback(
     (suggestion: AutocompleteResult) => {
+      // `geometry` is non-optional in the type, so these are plain reads. The guard is
+      // kept as a runtime backstop: an untyped or proxied API response would otherwise
+      // silently make every suggestion unselectable, which is exactly the bug this
+      // function used to have.
       const lat = suggestion.geometry?.location?.lat;
       const lng = suggestion.geometry?.location?.lng;
-      if (typeof lat !== "number" || typeof lng !== "number") return;
+      if (typeof lat !== "number" || typeof lng !== "number") {
+        console.error("Autocomplete suggestion arrived without coordinates", suggestion);
+        return;
+      }
 
       setCurrentLocation({ lat, lng });
       panTo(lat, lng, 16);

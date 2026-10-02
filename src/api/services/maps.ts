@@ -27,10 +27,11 @@ export interface AutocompleteResult {
     secondary_text: string;
   };
   /**
-   * Present on every suggestion, which is why selecting one needs no second request.
-   * Optional only because older cached responses may predate this field.
+   * Required. The client selects a suggestion from these coordinates rather than issuing
+   * a second `place-details` request, so a suggestion without geometry is unselectable -
+   * and TypeScript is the only thing that would have caught the server omitting it once.
    */
-  geometry?: {
+  geometry: {
     location: {
       lat: number;
       lng: number;
